@@ -1,17 +1,11 @@
 #include <register.hpp>
 
-void Register::setValue(u64 val, bool isSp) {
-    if (idx == 31 && isSp == false) [[unlikely]] {
-        return;
-    }
+using namespace std;
 
-    value = val;
+double VectorRegister::getValue() const {
+    return bit_cast<double>(static_cast<u64>(value & UINT64_MAX));
 }
 
-u64 Register::getValue(bool isSp) const {
-    if (idx == 31 && isSp == false) [[unlikely]] {
-        return 0;
-    }
-
-    return value;
+void VectorRegister::setValue(double val) {
+    value = static_cast<u128>(std::bit_cast<u64>(val));
 }

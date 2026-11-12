@@ -3,6 +3,8 @@
 #include <iostream>
 #include <print>
 
+using namespace std;
+
 ifstream            Core::stream{};
 vector<byte>        Core::memory;
 array<byte, 32768>  Core::romMemory;
@@ -13,9 +15,12 @@ Core::Core(size_t memSize) {
         regs.emplace_back(i, 0);
     }
 
-    memory.resize(memSize, byte{0});
-    memory[0x2000] = byte{42};
-    RVBAR_EL3.setValue(u64(&romMemory[0]));
+    if (idx == 0) {
+        memory.resize(memSize, byte{0});
+        memory[0x2000] = byte{42};
+    }
+
+    RVBAR_EL3.setValue(0ULL);
     exceptionLevel = ExceptionLevel::EL3;
     idx++;
 }
@@ -56,6 +61,10 @@ SpecialRegister& Core::currentSP() {
     return SP_EL[to_underlying(exceptionLevel)];
 }
 
+const SpecialRegister& Core::currentSP() const {
+    return SP_EL[to_underlying(exceptionLevel)];
+}
+
 u64 Core::getReg(u8 idx, bool isSp) {
     if (idx == 31) [[unlikely]] {
         return isSp ? currentSP().getValue() : 0ULL;
@@ -84,6 +93,38 @@ void Core::setReg(u8 idx, u64 val, bool isSp) {
     }
 }
 
+void Core::executeBranch(u32 raw) {
+
+}
+
+void Core::executeLoadStore(u32 raw) {
+
+}
+
+void Core::executeMove(u32 raw) {
+
+}
+
+void Core::executeArithmetic(u32 raw) {
+
+}
+
+void Core::executeBitfield(u32 raw) {
+
+}
+
+void Core::executeSystem(u32 raw) {
+
+}
+
+void Core::executeSIMD(u32 raw) {
+
+}
+
+void Core::executeCSelection(u32 raw) {
+
+}
+
 void Core::execute() {
     u32 raw = read<u32>(pc.getValue());
     if (extractBits(raw, 30, 26) == 0b00101) {
@@ -93,7 +134,7 @@ void Core::execute() {
         u64 target = u64(i64(pc.getValue()) + offset);
 
         if (op == 1) {
-            regs[30].setValue(pc.getValue() + 4);
+            setReg(30, pc.getValue() + 4, false);
         }
 
         pc.setValue(target);
@@ -109,15 +150,17 @@ void Core::execute() {
         u32 rn = extractBits(raw, 9, 5);
         u32 rd = extractBits(raw, 4, 0);
 
+        u64 rnVal = getReg(rn, true);
+        bool rdIsSp = (s == 0);
+
         if (op == 1 && s == 1 && rd == 31) {
             u32 value = 0;
-            u64 rnVal = regs[rn].getValue();
             if (sf) {
                 u64 res = rnVal - imm12;
                 if ((res >> 63) & 1) {
                     value |= (1u << 31);
                 }
-                    
+
                 if (res == 0) {
                     value |= (1u << 30);
                 }
@@ -153,20 +196,14 @@ void Core::execute() {
             NZCV.setValue(value);
             pc.setValue(pc.getValue() + 4);
             return;
-        } else if (op == 0 && s == 0 && imm12 == 0 && (rd == 31 || rn == 31)) {
-            regs[rd].setValue(regs[rn].getValue());
-            pc.setValue(pc.getValue() + 4);
-            return;
         }
 
-        u64 res = (op == 1) ? (regs[rn].getValue() - imm12)
-                            : (regs[rn].getValue() + imm12);
-
+        u64 res = (op == 1) ? (rnVal - imm12) : (rnVal + imm12);
         if (!sf) [[unlikely]] {
             res &= 0xFFFF'FFFFULL;
         }
 
-        regs[rd].setValue(res);
+        setReg(rd, res, rdIsSp);
 
         pc.setValue(pc.getValue() + 4);
         return;
@@ -181,24 +218,23 @@ void Core::execute() {
 
         if (opc <= 1) {
             u32 offset = imm12 << size;
+            u64 addr = getReg(rn, true) + offset;
+
             if (opc == 1) {
                 u64 r{};
                 if (size == 3) [[likely]] {
-                    r = read<u64>(u64(regs[rn].getValue() + offset));
+                    r = read<u64>(addr);
                 } else if (size == 2) {
-                    r = read<u32>(u64(regs[rn].getValue() + offset));
+                    r = read<u32>(addr);
                 } else if (size == 1) {
-                    r = read<u16>(u64(regs[rn].getValue() + offset));
+                    r = read<u16>(addr);
                 } else if (size == 0) {
-                    r = read<u8>(u64(regs[rn].getValue() + offset));
+                    r = read<u8>(addr);
                 }
 
-                if (rt != 31) [[likely]] {
-                    regs[rt].setValue(r);
-                }
+                setReg(rt, r, false);
             } else {
-                u64 rtVal = (rt == 31) ? 0ULL : regs[rt].getValue();
-                u64 addr = u64(regs[rn].getValue() + offset);
+                u64 rtVal = getReg(rt, false);
                 if (size == 3) [[likely]] {
                     write<u64>(addr, rtVal);
                 } else if (size == 2) {
@@ -218,11 +254,15 @@ void Core::execute() {
 
 void Core::dumpRegisters() const {
     cout << hex << showbase << endl;
-    for (int i = 0; i < 32; i += 2) {
+    for (int i = 0; i < 30; i += 2) {
         println("{:<4}: {:#x}\t{:<4}: {:#x}",
              regs[i].getName(), regs[i].getValue(),
              regs[i + 1].getName(), regs[i + 1].getValue());
     }
+
+    println("{:<4}: {:#x}\t{:<4}: {:#x}",
+             regs[30].getName(), regs[30].getValue(),
+             currentSP().getName(), currentSP().getValue());
 
     cout << endl << "PC: " << pc.getValue() << endl;
 
